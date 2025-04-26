@@ -16,21 +16,23 @@ import tempfile
 st.set_page_config(page_title="Speech Transcription Demo")
 st.title("🎤 Speech Transcription Demo")
 
+# Compact input header
+col1, col2 = st.columns([2, 2])
+with col1:
+    uploaded_file = st.file_uploader(
+        "Audio file",
+        type=["wav", "mp3", "m4a", "ogg", "flac", "webm"],
+        accept_multiple_files=False,
+    )
+with col2:
+    model_options = ["tiny", "base", "small", "medium", "large"]
+    model_choice = st.selectbox("Model", model_options, index=1)
+    LANGUAGES = {"English": "en", "Spanish": "es", "French": "fr"}
+    language_display = st.selectbox("Language", list(LANGUAGES.keys()), index=0)
+    language_hint = LANGUAGES[language_display]
+
 st.write(
-    "Upload an audio file (wav, mp3, m4a, etc.), play it, and transcribe using OpenAI Whisper."
-)
-
-uploaded_file = st.file_uploader(
-    "Choose an audio file", type=["wav", "mp3", "m4a", "ogg", "flac", "webm"]
-)
-
-# Whisper model options
-model_options = ["tiny", "base", "small", "medium", "large"]
-model_choice = st.selectbox("Select Whisper model", model_options, index=1)
-
-# Optional: Language hint
-language_hint = st.text_input(
-    "Language hint (optional, e.g. 'en', 'es', 'fr')", value=""
+    ":arrow_up: Upload an audio file, select your model, and transcribe using OpenAI Whisper."
 )
 
 if uploaded_file is not None:
@@ -91,42 +93,50 @@ if uploaded_file is not None:
     # Show annotation UI if transcription exists
     if "transcription_text" in st.session_state:
         transcription_text = st.session_state["transcription_text"]
-        st.text_area(
-            "Transcription",
-            transcription_text,
-            height=200,
-            key="transcription",
-            disabled=True,
-        )
-        st.subheader("Annotate this entry:")
-        name = st.text_input("Name", value=st.session_state.get("name", ""), key="name")
-        phone = st.text_input(
-            "Phone", value=st.session_state.get("phone", ""), key="phone"
-        )
-        address = st.text_input(
-            "Address", value=st.session_state.get("address", ""), key="address"
-        )
-        notes = st.text_area(
-            "Notes", value=st.session_state.get("notes", ""), key="notes"
-        )
+        with st.form("annotation_form"):
+            st.subheader("Annotate this entry")
+            st.text_area(
+                "Transcription",
+                transcription_text,
+                height=200,
+                key="transcription",
+                disabled=False,
+            )
+            name, phone = st.columns(2)
+            with name:
+                name_val = st.text_input(
+                    "Name", value=st.session_state.get("name", ""), key="name"
+                )
+            with phone:
+                phone_val = st.text_input(
+                    "Phone", value=st.session_state.get("phone", ""), key="phone"
+                )
+            address = st.text_input(
+                "Address", value=st.session_state.get("address", ""), key="address"
+            )
+            notes = st.text_area(
+                "Notes", value=st.session_state.get("notes", ""), key="notes"
+            )
+            col_save, col_download = st.columns([1, 1])
+            with col_save:
+                save_clicked = st.form_submit_button("Save Annotation")
+            with col_download:
+                download_clicked = st.form_submit_button("Download as .txt")
 
-        # Save button
-        if st.button("Save Annotation"):
+        if save_clicked:
             entry = {
-                "name": name,
-                "phone": phone,
+                "name": name_val,
+                "phone": phone_val,
                 "address": address,
                 "notes": notes,
                 "transcription": transcription_text,
             }
             save_entry(entry)
             st.success("Entry saved!")
-
-        # Download as .txt button
-        if st.button("Download as .txt"):
+        if download_clicked:
             entry = {
-                "name": name,
-                "phone": phone,
+                "name": name_val,
+                "phone": phone_val,
                 "address": address,
                 "notes": notes,
                 "transcription": transcription_text,
@@ -135,23 +145,27 @@ if uploaded_file is not None:
             st.download_button(
                 label="Download Annotated Entry",
                 data=txt,
-                file_name=f"transcription_{name or 'entry'}.txt",
+                file_name=f"transcription_{name_val or 'entry'}.txt",
                 mime="text/plain",
+                key="download_current_entry",
             )
 
-    # Show saved entries
-    st.subheader("Saved Entries (this session):")
-    entries = st.session_state.get("entries", [])
-    for i, entry in enumerate(entries):
-        with st.expander(f"Entry {i+1}: {entry['name'] or 'No Name'}"):
-            st.write(f"**Phone:** {entry['phone']}")
-            st.write(f"**Address:** {entry['address']}")
-            st.write(f"**Notes:** {entry['notes']}")
-            st.write(f"**Transcription:**\n{entry['transcription']}")
-            st.download_button(
-                label="Download This Entry as .txt",
-                data=entry_to_txt(entry),
-                file_name=f"transcription_{entry['name'] or 'entry'}.txt",
-                mime="text/plain",
-                key=f"download_{i}",
-            )
+    # Show saved entries in the sidebar
+    with st.sidebar:
+        st.subheader("📋 Saved Entries (this session)")
+        entries = st.session_state.get("entries", [])
+        if not entries:
+            st.info("No saved entries yet.")
+        for i, entry in enumerate(entries):
+            with st.expander(f"Entry {i+1}: {entry['name'] or 'No Name'}"):
+                st.write(f"**Phone:** {entry['phone']}")
+                st.write(f"**Address:** {entry['address']}")
+                st.write(f"**Notes:** {entry['notes']}")
+                st.write(f"**Transcription:**\n{entry['transcription']}\n")
+                st.download_button(
+                    label="Download This Entry as .txt",
+                    data=entry_to_txt(entry),
+                    file_name=f"transcription_{entry['name'] or 'entry'}.txt",
+                    mime="text/plain",
+                    key=f"download_{i}",
+                )
