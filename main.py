@@ -14,20 +14,18 @@ import streamlit as st
 import whisper
 import tempfile
 
-st.set_page_config(page_title="Speech Transcription Demo")
-st.title("🎤 Speech Transcription Demo")
+st.set_page_config(page_title="Speech-to-Text Demo")
+st.title("🎤 Speech-to-Text Demo")
 st.markdown(
     """
     <style>
-        .stFileUploader {
-            display: flex;
-            flex-direction: column;
-        }
-        .stFileUploader section {
-            /* min-height: 11.25rem; */
-        }
         .stTooltipIcon div {
             min-width: 100%;
+        }
+        .stFileUploader > div {
+            margin-block-start: 0.5rem;
+            border: 1px solid var(--in-content-box-border-color);
+            border-radius: 0.5rem;
         }
         .stForm button,
         .stFileUploader section button {
@@ -35,19 +33,18 @@ st.markdown(
         }
         .stTooltipIcon div button {
             width: 100%;
-            margin-block-start: 1.5rem;
+            margin-block-start: 2.7rem;
         }
         .stHorizontalBlock {
             padding: 1rem;
-            box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.2);
-            border-radius: 8px;
+            border-radius: 0.5rem;
+            border: 1px solid var(--in-content-box-border-color);
         }
         .stForm {
-            border: none;
-            box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.2);
+            # border: none;
         }
         .stForm .stHorizontalBlock {
-            box-shadow: none;
+            border: none;
             padding: 0;
         }
         audio {
@@ -137,8 +134,6 @@ def entry_to_txt(entry):
 
 # --- Main Logic ---
 if uploaded_file is not None:
-    st.audio(uploaded_file, format=uploaded_file.type)
-
     # Save to a temp file for whisper
     suffix = os.path.splitext(uploaded_file.name)[-1] or ".wav"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
@@ -184,6 +179,7 @@ if uploaded_file is not None:
     if transcription_text:
         with st.form("annotation_form"):
             st.subheader("Annotate this entry")
+            st.audio(uploaded_file, format=uploaded_file.type)
             st.text_area(
                 "Transcription",
                 transcription_text,
