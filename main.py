@@ -3,6 +3,7 @@ import os
 os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
 
 import sys
+import contextlib
 
 if sys.platform.startswith("win"):
     import asyncio
@@ -15,8 +16,80 @@ import tempfile
 
 st.set_page_config(page_title="Speech Transcription Demo")
 st.title("🎤 Speech Transcription Demo")
+st.markdown(
+    """
+    <style>
+        .stFileUploader {
+            display: flex;
+            flex-direction: column;
+        }
+        .stFileUploader section {
+            /* min-height: 11.25rem; */
+        }
+        .stTooltipIcon div {
+            min-width: 100%;
+        }
+        .stForm button,
+        .stFileUploader section button {
+            width: 100%;
+        }
+        .stTooltipIcon div button {
+            width: 100%;
+            margin-block-start: 1.5rem;
+        }
+        .stHorizontalBlock {
+            padding: 1rem;
+            box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+        .stForm {
+            border: none;
+            box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.2);
+        }
+        .stForm .stHorizontalBlock {
+            box-shadow: none;
+            padding: 0;
+        }
+        audio {
+            border-radius: 8px;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-# Compact input header
+# --- Constants ---
+MODEL_OPTIONS = {
+    "Tiny (~39MB)": "tiny",
+    "Base (~74MB)": "base",
+    "Small (~244MB)": "small",
+    "Medium (~769MB)": "medium",
+    "Large (~1.55GB)": "large",
+}
+LANGUAGES = {"English": "en", "Spanish": "es", "French": "fr"}
+
+
+# --- Helper Functions ---
+def get_session_list(key):
+    """Get a list from session state, initializing if needed."""
+    if key not in st.session_state:
+        st.session_state[key] = []
+    return st.session_state[key]
+
+
+def get_session_value(key, default=None):
+    """Get a value from session state, initializing if needed."""
+    if key not in st.session_state:
+        st.session_state[key] = default
+    return st.session_state[key]
+
+
+def set_session_value(key, value):
+    """Set a value in session state."""
+    st.session_state[key] = value
+
+
+# --- UI Layout ---
 col1, col2 = st.columns([2, 2])
 with col1:
     uploaded_file = st.file_uploader(
@@ -25,46 +98,56 @@ with col1:
         accept_multiple_files=False,
     )
 with col2:
-    model_options = ["tiny", "base", "small", "medium", "large"]
-    model_choice = st.selectbox("Model", model_options, index=1)
-    LANGUAGES = {"English": "en", "Spanish": "es", "French": "fr"}
+    model_display = st.selectbox("Model", list(MODEL_OPTIONS.keys()), index=1)
+    model_choice = MODEL_OPTIONS[model_display]
     language_display = st.selectbox("Language", list(LANGUAGES.keys()), index=0)
     language_hint = LANGUAGES[language_display]
+    transcribe_clicked = st.button(
+        "Transcribe",
+        disabled=uploaded_file is None,
+        help="Upload an audio file to enable transcription.",
+    )
 
-st.write(
-    ":arrow_up: Upload an audio file, select your model, and transcribe using OpenAI Whisper."
-)
 
+# --- Caching ---
+@st.cache_resource(show_spinner=False)
+def get_whisper_model(model_choice):
+    """Load and cache the Whisper model by model_choice."""
+    return whisper.load_model(model_choice)
+
+
+@st.cache_data(show_spinner=False)
+def save_entry(entry):
+    """Save an annotated entry to session state."""
+    entries = get_session_list("entries")
+    entries.append(entry)
+    set_session_value("entries", entries)
+    return entries
+
+
+def entry_to_txt(entry):
+    """Format an entry as plain text for download."""
+    return (
+        f"Name: {entry['name']}\n"
+        f"Phone: {entry['phone']}\n"
+        f"Address: {entry['address']}\n"
+        f"Notes: {entry['notes']}\n---\nTranscription:\n{entry['transcription']}\n"
+    )
+
+
+# --- Main Logic ---
 if uploaded_file is not None:
-    # Play the audio
     st.audio(uploaded_file, format=uploaded_file.type)
 
     # Save to a temp file for whisper
-    with tempfile.NamedTemporaryFile(
-        delete=False, suffix=uploaded_file.name[-4:]
-    ) as tmp_file:
-        tmp_file.write(uploaded_file.read())
+    suffix = os.path.splitext(uploaded_file.name)[-1] or ".wav"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+        with contextlib.suppress(Exception):
+            tmp_file.write(uploaded_file.read())
         tmp_path = tmp_file.name
 
-    # Helper to save annotated entry
-    @st.cache_data(show_spinner=False)
-    def save_entry(entry):
-        if "entries" not in st.session_state:
-            st.session_state["entries"] = []
-        st.session_state["entries"].append(entry)
-        return st.session_state["entries"]
-
-    def entry_to_txt(entry):
-        return f"Name: {entry['name']}\nPhone: {entry['phone']}\nAddress: {entry['address']}\nNotes: {entry['notes']}\n---\nTranscription:\n{entry['transcription']}\n"
-
-    # Cache the Whisper model per model_choice
-    @st.cache_resource(show_spinner=False)
-    def get_whisper_model(model_choice):
-        return whisper.load_model(model_choice)
-
     # Manual transcription trigger
-    if st.button("Transcribe"):
-        # Show a temporary notification using st.toast if available (Streamlit >=1.29)
+    if transcribe_clicked:
         try:
             st.toast(
                 f"Transcribing with model '{model_choice}'... This may take a while."
@@ -80,19 +163,25 @@ if uploaded_file is not None:
                 st.toast("Transcription complete!")
             except AttributeError:
                 st.success("Transcription complete!")
-            # Store transcription in session state
-            st.session_state["transcription_text"] = result["text"]
-            # Reset annotation fields
-            st.session_state["name"] = ""
-            st.session_state["phone"] = ""
-            st.session_state["address"] = ""
-            st.session_state["notes"] = ""
+            set_session_value("transcription_text", result["text"])
+            set_session_value("name", "")
+            set_session_value("phone", "")
+            set_session_value("address", "")
+            set_session_value("notes", "")
         except Exception as e:
-            st.error(f"Error during transcription: {e}")
+            error_msg = str(e)
+            if "not found; available models" in error_msg:
+                # Extract available models from the error message
+                available = error_msg.split("available models =", 1)[-1].strip()
+                st.error(
+                    f"The selected model '{model_choice}' was not found.\nAvailable models: {available}\nPlease select a valid model from the list."
+                )
+            else:
+                st.error(f"An error occurred during transcription: {e}")
 
     # Show annotation UI if transcription exists
-    if "transcription_text" in st.session_state:
-        transcription_text = st.session_state["transcription_text"]
+    transcription_text = st.session_state.get("transcription_text")
+    if transcription_text:
         with st.form("annotation_form"):
             st.subheader("Annotate this entry")
             st.text_area(
@@ -102,12 +191,12 @@ if uploaded_file is not None:
                 key="transcription",
                 disabled=False,
             )
-            name, phone = st.columns(2)
-            with name:
+            name_col, phone_col = st.columns(2)
+            with name_col:
                 name_val = st.text_input(
                     "Name", value=st.session_state.get("name", ""), key="name"
                 )
-            with phone:
+            with phone_col:
                 phone_val = st.text_input(
                     "Phone", value=st.session_state.get("phone", ""), key="phone"
                 )
@@ -123,24 +212,17 @@ if uploaded_file is not None:
             with col_download:
                 download_clicked = st.form_submit_button("Download as .txt")
 
+        entry = {
+            "name": name_val,
+            "phone": phone_val,
+            "address": address,
+            "notes": notes,
+            "transcription": transcription_text,
+        }
         if save_clicked:
-            entry = {
-                "name": name_val,
-                "phone": phone_val,
-                "address": address,
-                "notes": notes,
-                "transcription": transcription_text,
-            }
             save_entry(entry)
             st.success("Entry saved!")
         if download_clicked:
-            entry = {
-                "name": name_val,
-                "phone": phone_val,
-                "address": address,
-                "notes": notes,
-                "transcription": transcription_text,
-            }
             txt = entry_to_txt(entry)
             st.download_button(
                 label="Download Annotated Entry",
@@ -157,7 +239,7 @@ if uploaded_file is not None:
         if not entries:
             st.info("No saved entries yet.")
         for i, entry in enumerate(entries):
-            with st.expander(f"Entry {i+1}: {entry['name'] or 'No Name'}"):
+            with st.expander(f"Entry {i + 1}: {entry['name'] or 'No Name'}"):
                 st.write(f"**Phone:** {entry['phone']}")
                 st.write(f"**Address:** {entry['address']}")
                 st.write(f"**Notes:** {entry['notes']}")
